@@ -55,11 +55,11 @@ func (connector *Connector) balanceConnections() {
 				fmt.Print(error)
 				continue
 			}
-			atomic.AddInt32(&connector.connectionsCount, 1)
 			connector.connections <- &Connection{
 				connection: &connection,
 				activeTime: time.Now(),
 			}
+			atomic.AddInt32(&connector.connectionsCount, 1)
 		}
 		connector.mutex.Unlock()
 		time.Sleep(time.Millisecond * 500)
@@ -88,7 +88,6 @@ func (connector *Connector) execute(exec func(connection interface{}) (interface
 			connection.activeTime = time.Now()
 		}
 		result, error := connector.exec(exec, connection)
-		connector.connections <- connection
 		return result, error
 	default:
 		connector.mutex.Lock()
@@ -103,7 +102,6 @@ func (connector *Connector) execute(exec func(connection interface{}) (interface
 		atomic.AddInt32(&connector.connectionsCount, 1)
 		connection := &Connection{connection: &connectionInstance, activeTime: time.Now()}
 		result, error := connector.exec(exec, connection)
-		connector.connections <- connection
 		return result, error
 	}
 }
@@ -115,6 +113,7 @@ func (connector *Connector) exec(exec func(connection interface{}) (interface{},
 		connector.discard(connection)
 		return nil, error
 	}
+	connector.connections <- connection
 	return result, nil
 }
 
