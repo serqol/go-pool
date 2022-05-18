@@ -81,40 +81,41 @@ func (connector *Connector) Execute(exec func(connection interface{}) (interface
 func (connector *Connector) execute(exec func(connection interface{}) (interface{}, error)) (interface{}, error) {
 	select {
 	case connection := <-connector.connections:
-		return connector.executeAndReturn(exec, connection)
+		if connection.activeTime.Add(connector.maxIdle).Before(time.Now()) {
+			connector.discard(connection)
+			return connector.execute(exec)
+		} else {
+			connection.activeTime = time.Now()
+		}
+		result, error := connector.exec(exec, connection)
+		connector.connections <- connection
+		return result, error
 	default:
-		connector.mutex.Lock()
-		defer connector.mutex.Unlock()
 		if int(atomic.LoadInt32(&connector.connectionsCount)) >= int(connector.maxActive) {
 			return nil, fmt.Errorf("max active connections %d reached", connector.maxActive)
 		}
-		return connector.executeAndReturn(exec, nil)
-	}
-}
-
-func (connector *Connector) executeAndReturn(exec func(connection interface{}) (interface{}, error), connection *Connection) (interface{}, error) {
-	if connection == nil {
+		connector.mutex.Lock()
+		defer connector.mutex.Unlock()
 		connectionInstance, error := connector.connCb()
 		if error != nil {
 			return nil, error
 		}
 		atomic.AddInt32(&connector.connectionsCount, 1)
-		connection = &Connection{connection: &connectionInstance, activeTime: time.Now()}
-	} else if connection.activeTime.Add(connector.maxIdle).Before(time.Now()) {
-		connector.mutex.Lock()
-		defer connector.mutex.Unlock()
-		connector.discard(connection)
-		return connector.executeAndReturn(exec, nil)
-	} else {
-		connection.activeTime = time.Now()
+		connection := &Connection{connection: &connectionInstance, activeTime: time.Now()}
+		result, error := connector.exec(exec, connection)
+		connector.connections <- connection
+		return result, error
 	}
+}
+
+func (connector *Connector) exec(exec func(connection interface{}) (interface{}, error), connection *Connection) (interface{}, error) {
 	result, error := exec(*connection.connection)
 	if error != nil {
+		fmt.Print(error)
 		connector.discard(connection)
 		return nil, error
 	}
-	connector.connections <- connection
-	return result, error
+	return result, nil
 }
 
 func (connector *Connector) discard(connection *Connection) {
