@@ -91,11 +91,11 @@ func (connector *Connector) execute(exec func(connection interface{}) (interface
 		connector.connections <- connection
 		return result, error
 	default:
+		connector.mutex.Lock()
+		defer connector.mutex.Unlock()
 		if int(atomic.LoadInt32(&connector.connectionsCount)) >= int(connector.maxActive) {
 			return nil, fmt.Errorf("max active connections %d reached", connector.maxActive)
 		}
-		connector.mutex.Lock()
-		defer connector.mutex.Unlock()
 		connectionInstance, error := connector.connCb()
 		if error != nil {
 			return nil, error
